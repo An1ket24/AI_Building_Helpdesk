@@ -13,6 +13,10 @@ export interface ChatAnalysis {
   location?: string | null;
   priority: string;
   solution: string;
+  intent: string;
+  confidence: number;
+  requiresHumanHandoff: boolean;
+  handoffReason?: string | null;
   shouldOfferTicket: boolean;
   botMessage: string;
 }

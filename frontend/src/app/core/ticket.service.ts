@@ -16,7 +16,7 @@ export class TicketService {
     return firstValueFrom(this.http.post<Ticket>(this.apiUrl, payload));
   }
 
-  updateTicket(id: number, payload: { status: string; assignedTo?: string | null }): Promise<Ticket> {
+  updateTicket(id: number, payload: { status: string; priority: string; assignedTo?: string | null }): Promise<Ticket> {
     return firstValueFrom(this.http.put<Ticket>(`${this.apiUrl}/${id}`, payload));
   }
 }

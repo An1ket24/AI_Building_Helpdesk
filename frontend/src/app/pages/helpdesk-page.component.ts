@@ -53,6 +53,10 @@ export class HelpdeskPageComponent implements OnInit {
       const analysis = await this.chatService.analyze(message);
       this.messages.update((items) => [...items, { sender: 'bot', text: analysis.botMessage }]);
       this.pendingAnalysis.set(analysis.shouldOfferTicket ? analysis : null);
+
+      if (analysis.requiresHumanHandoff) {
+        this.toastService.show('Human follow-up recommended for this issue.', 'info');
+      }
     } catch (error) {
       console.error(error);
       this.messages.update((items) => [...items, { sender: 'bot', text: 'I could not process that message right now. Please try again.' }]);

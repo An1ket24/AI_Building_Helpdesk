@@ -44,6 +44,9 @@
           <div>
             <strong>Create ticket?</strong>
             <p class="muted">{{ pendingAnalysis()?.issue }} • {{ pendingAnalysis()?.category }} • {{ pendingAnalysis()?.priority }}</p>
+            @if (pendingAnalysis()?.requiresHumanHandoff) {
+              <p class="muted">Human handoff recommended: {{ pendingAnalysis()?.handoffReason }}</p>
+            }
           </div>
           <div class="confirm-actions">
             <button class="btn btn-primary" type="button" (click)="confirmTicketCreation(true)">Yes, create ticket</button>

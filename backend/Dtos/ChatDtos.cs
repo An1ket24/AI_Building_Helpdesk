@@ -8,5 +8,9 @@ public record ChatAnalysisDto(
     string? Location,
     string Priority,
     string Solution,
+    string Intent,
+    double Confidence,
+    bool RequiresHumanHandoff,
+    string? HandoffReason,
     bool ShouldOfferTicket,
     string BotMessage);

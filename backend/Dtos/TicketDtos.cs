@@ -6,7 +6,7 @@ public record CreateTicketRequest(
     string? Location,
     string Priority);
 
-public record UpdateTicketRequest(string Status, string? AssignedTo);
+public record UpdateTicketRequest(string Status, string Priority, string? AssignedTo);
 
 public record TicketResponse(
     int Id,

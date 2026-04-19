@@ -31,6 +31,7 @@ export class AdminDashboardComponent implements OnInit {
     try {
       const updated = await this.ticketService.updateTicket(ticket.id, {
         status: ticket.status,
+        priority: ticket.priority,
         assignedTo: ticket.assignedTo ?? ''
       });
 

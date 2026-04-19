@@ -79,6 +79,7 @@ public class TicketsController(AppDbContext context) : ControllerBase
         }
 
         ticket.Status = string.IsNullOrWhiteSpace(request.Status) ? ticket.Status : request.Status;
+        ticket.Priority = string.IsNullOrWhiteSpace(request.Priority) ? ticket.Priority : request.Priority;
         ticket.AssignedTo = request.AssignedTo?.Trim();
         await context.SaveChangesAsync();
 
