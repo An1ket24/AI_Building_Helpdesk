@@ -1,27 +1,95 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using backend.Data;
 using backend.Dtos;
+using Microsoft.EntityFrameworkCore;
 
 namespace backend.Services;
 
-public class OpenRouterService(HttpClient httpClient, IConfiguration configuration) : IOpenRouterService
+public class OpenRouterService(HttpClient httpClient, IConfiguration configuration, AppDbContext context) : IOpenRouterService
 {
-    private static readonly KnowledgeArticle[] KnowledgeBase =
-    [
-        new("WiFi Troubleshooting", "IT", "Reconnect to building WiFi, restart the device, forget and rejoin the network, and confirm whether nearby users are affected too."),
-        new("Printer Recovery", "IT", "Check printer power, toner, paper, and network connection. If shared, confirm the device is online on the office network."),
-        new("HVAC Temperature Check", "HVAC", "Confirm thermostat settings, local power, and whether the issue affects one room or a wider area before dispatch."),
-        new("Plumbing Leak Response", "Plumbing", "Keep the area clear, avoid using nearby fixtures, and isolate the water source if safe while maintenance is notified."),
-        new("Cleaning Spill SOP", "Cleaning", "Mark the affected area, keep foot traffic away, and report the exact location and spill type."),
-        new("Access Control Guide", "Security", "Check badge validity, try another approved access point, and confirm whether the issue affects one door or a wider access zone."),
-        new("Power Disruption Check", "Electrical", "Confirm whether only one outlet, one room, or the whole area is affected. Avoid unsafe resets if there is odor, heat, or sparking.")
-    ];
-
     private static readonly string[] SafetyKeywords = ["fire", "smoke", "burning", "electrical smell", "gas", "sparks", "flood", "major leak", "alarm", "shock"];
 
-    private static string Prompt =>
-        $"""
+    public async Task<ChatAnalysisDto> AnalyzeIssueAsync(string message, CancellationToken cancellationToken)
+    {
+        var normalizedMessage = message.Trim();
+        var knowledgeArticles = await context.KnowledgeBaseArticles
+            .Where(article => article.IsActive)
+            .OrderBy(article => article.Category)
+            .ThenBy(article => article.Title)
+            .ToListAsync(cancellationToken);
+
+        var apiKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY") ?? configuration["OpenRouter:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return BuildFallbackAnalysis(normalizedMessage, knowledgeArticles);
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, configuration["OpenRouter:Url"]);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            request.Headers.Add("HTTP-Referer", configuration["Frontend:PublicUrl"] ?? "http://localhost:4200");
+            request.Headers.Add("X-Title", "Smart Building Helpdesk");
+
+            var payload = new
+            {
+                model = configuration["OpenRouter:Model"],
+                temperature = 0.2,
+                messages = new object[]
+                {
+                    new { role = "system", content = BuildPrompt(knowledgeArticles) },
+                    new { role = "user", content = normalizedMessage }
+                }
+            };
+
+            request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            using var outerJson = JsonDocument.Parse(body);
+            var content = outerJson.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString();
+
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return BuildFallbackAnalysis(normalizedMessage, knowledgeArticles);
+            }
+
+            var cleanedJson = content.Trim().Trim('`');
+            if (cleanedJson.StartsWith("json", StringComparison.OrdinalIgnoreCase))
+            {
+                cleanedJson = cleanedJson[4..].Trim();
+            }
+
+            var aiResponse = JsonSerializer.Deserialize<AiResponse>(cleanedJson, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            return aiResponse is null
+                ? BuildFallbackAnalysis(normalizedMessage, knowledgeArticles)
+                : NormalizeResponse(normalizedMessage, aiResponse, knowledgeArticles);
+        }
+        catch
+        {
+            return BuildFallbackAnalysis(normalizedMessage, knowledgeArticles);
+        }
+    }
+
+    private static string BuildPrompt(List<backend.Models.KnowledgeBaseArticle> knowledgeArticles)
+    {
+        var articleText = knowledgeArticles.Count == 0
+            ? "- No custom knowledge articles configured. Use general smart building helpdesk behavior."
+            : string.Join("\n", knowledgeArticles.Select(article => $"- {article.Title} [{article.Category}]: {article.Guidance}"));
+
+        return $"""
         You are a smart building helpdesk specialist.
 
         Your job is to manage user queries for a building helpdesk system.
@@ -36,7 +104,7 @@ public class OpenRouterService(HttpClient httpClient, IConfiguration configurati
         Use the knowledge base below when it is relevant. Prefer these building-specific guides over generic answers.
 
         Knowledge base:
-        {string.Join("\n", KnowledgeBase.Select(article => $"- {article.Title} [{article.Category}]: {article.Guidance}"))}
+        {articleText}
 
         Return JSON only with these fields:
         - issue
@@ -61,84 +129,18 @@ public class OpenRouterService(HttpClient httpClient, IConfiguration configurati
         - Keep botMessage user-facing, concise, and natural.
         - Return JSON only. No markdown.
         """;
-
-    public async Task<ChatAnalysisDto> AnalyzeIssueAsync(string message, CancellationToken cancellationToken)
-    {
-        var normalizedMessage = message.Trim();
-        var apiKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY") ?? configuration["OpenRouter:ApiKey"];
-
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            return BuildFallbackAnalysis(normalizedMessage);
-        }
-
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, configuration["OpenRouter:Url"]);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            request.Headers.Add("HTTP-Referer", configuration["Frontend:PublicUrl"] ?? "http://localhost:4200");
-            request.Headers.Add("X-Title", "Smart Building Helpdesk");
-
-            var payload = new
-            {
-                model = configuration["OpenRouter:Model"],
-                temperature = 0.2,
-                messages = new object[]
-                {
-                    new { role = "system", content = Prompt },
-                    new { role = "user", content = normalizedMessage }
-                }
-            };
-
-            request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-
-            using var response = await httpClient.SendAsync(request, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            response.EnsureSuccessStatusCode();
-
-            using var outerJson = JsonDocument.Parse(body);
-            var content = outerJson.RootElement
-                .GetProperty("choices")[0]
-                .GetProperty("message")
-                .GetProperty("content")
-                .GetString();
-
-            if (string.IsNullOrWhiteSpace(content))
-            {
-                return BuildFallbackAnalysis(normalizedMessage);
-            }
-
-            var cleanedJson = content.Trim().Trim('`');
-            if (cleanedJson.StartsWith("json", StringComparison.OrdinalIgnoreCase))
-            {
-                cleanedJson = cleanedJson[4..].Trim();
-            }
-
-            var aiResponse = JsonSerializer.Deserialize<AiResponse>(cleanedJson, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
-
-            return aiResponse is null
-                ? BuildFallbackAnalysis(normalizedMessage)
-                : NormalizeResponse(normalizedMessage, aiResponse);
-        }
-        catch
-        {
-            return BuildFallbackAnalysis(normalizedMessage);
-        }
     }
 
-    private static ChatAnalysisDto NormalizeResponse(string message, AiResponse aiResponse)
+    private static ChatAnalysisDto NormalizeResponse(string message, AiResponse aiResponse, List<backend.Models.KnowledgeBaseArticle> knowledgeArticles)
     {
         var lowerMessage = message.ToLowerInvariant();
         var issue = string.IsNullOrWhiteSpace(aiResponse.Issue) ? message : aiResponse.Issue.Trim();
-        var category = string.IsNullOrWhiteSpace(aiResponse.Category) ? DetectCategory(lowerMessage) : aiResponse.Category.Trim();
+        var category = string.IsNullOrWhiteSpace(aiResponse.Category) ? DetectCategory(lowerMessage, knowledgeArticles) : aiResponse.Category.Trim();
         var location = string.IsNullOrWhiteSpace(aiResponse.Location) ? DetectLocation(message) : aiResponse.Location.Trim();
         var priority = NormalizePriority(aiResponse.Priority, lowerMessage);
-        var intent = NormalizeIntent(aiResponse.Intent, lowerMessage);
+        var intent = NormalizeIntent(aiResponse.Intent, lowerMessage, knowledgeArticles);
         var confidence = Math.Clamp(aiResponse.Confidence <= 0 ? 0.6 : aiResponse.Confidence, 0.0, 1.0);
-        var solution = string.IsNullOrWhiteSpace(aiResponse.Solution) ? DefaultSolution(category) : aiResponse.Solution.Trim();
+        var solution = string.IsNullOrWhiteSpace(aiResponse.Solution) ? DefaultSolution(category, knowledgeArticles) : aiResponse.Solution.Trim();
         var botMessage = string.IsNullOrWhiteSpace(aiResponse.BotMessage) ? solution : aiResponse.BotMessage.Trim();
         var shouldOfferTicket = aiResponse.ShouldOfferTicket;
         var requiresHumanHandoff = aiResponse.RequiresHumanHandoff;
@@ -193,28 +195,17 @@ public class OpenRouterService(HttpClient httpClient, IConfiguration configurati
             }
         }
 
-        return new ChatAnalysisDto(
-            Issue: issue,
-            Category: category,
-            Location: location,
-            Priority: priority,
-            Solution: solution,
-            Intent: intent,
-            Confidence: Math.Round(confidence, 2),
-            RequiresHumanHandoff: requiresHumanHandoff,
-            HandoffReason: handoffReason,
-            ShouldOfferTicket: shouldOfferTicket,
-            BotMessage: botMessage);
+        return new ChatAnalysisDto(issue, category, location, priority, solution, intent, Math.Round(confidence, 2), requiresHumanHandoff, handoffReason, shouldOfferTicket, botMessage);
     }
 
-    private static ChatAnalysisDto BuildFallbackAnalysis(string message)
+    private static ChatAnalysisDto BuildFallbackAnalysis(string message, List<backend.Models.KnowledgeBaseArticle> knowledgeArticles)
     {
         var lowerMessage = message.ToLowerInvariant();
-        var intent = NormalizeIntent(null, lowerMessage);
-        var category = DetectCategory(lowerMessage);
+        var intent = NormalizeIntent(null, lowerMessage, knowledgeArticles);
+        var category = DetectCategory(lowerMessage, knowledgeArticles);
         var location = DetectLocation(message);
         var priority = NormalizePriority(null, lowerMessage);
-        var solution = DefaultSolution(category);
+        var solution = DefaultSolution(category, knowledgeArticles);
         var requiresHumanHandoff = IsSafetyRelated(lowerMessage);
         var shouldOfferTicket = intent == "ticket_creation_request" || requiresHumanHandoff || intent == "troubleshooting_request";
         var botMessage = intent switch
@@ -228,20 +219,20 @@ public class OpenRouterService(HttpClient httpClient, IConfiguration configurati
         };
 
         return new ChatAnalysisDto(
-            Issue: message,
-            Category: intent is "greeting_general_chat" or "unrelated_query" or "ticket_status_query" ? "General" : category,
-            Location: intent is "greeting_general_chat" or "unrelated_query" or "ticket_status_query" ? null : location,
-            Priority: intent is "greeting_general_chat" or "unrelated_query" or "ticket_status_query" ? "Low" : priority,
-            Solution: solution,
-            Intent: intent,
-            Confidence: 0.45,
-            RequiresHumanHandoff: requiresHumanHandoff,
-            HandoffReason: requiresHumanHandoff ? "Potential safety-related incident" : null,
-            ShouldOfferTicket: intent != "greeting_general_chat" && intent != "unrelated_query" && intent != "ticket_status_query" && shouldOfferTicket,
-            BotMessage: botMessage);
+            message,
+            intent is "greeting_general_chat" or "unrelated_query" or "ticket_status_query" ? "General" : category,
+            intent is "greeting_general_chat" or "unrelated_query" or "ticket_status_query" ? null : location,
+            intent is "greeting_general_chat" or "unrelated_query" or "ticket_status_query" ? "Low" : priority,
+            solution,
+            intent,
+            0.45,
+            requiresHumanHandoff,
+            requiresHumanHandoff ? "Potential safety-related incident" : null,
+            intent != "greeting_general_chat" && intent != "unrelated_query" && intent != "ticket_status_query" && shouldOfferTicket,
+            botMessage);
     }
 
-    private static string NormalizeIntent(string? intent, string lowerMessage)
+    private static string NormalizeIntent(string? intent, string lowerMessage, List<backend.Models.KnowledgeBaseArticle> knowledgeArticles)
     {
         var normalized = intent?.Trim().ToLowerInvariant();
         if (normalized is "greeting_general_chat" or "troubleshooting_request" or "ticket_creation_request" or "ticket_status_query" or "unrelated_query")
@@ -264,7 +255,7 @@ public class OpenRouterService(HttpClient httpClient, IConfiguration configurati
             return "ticket_creation_request";
         }
 
-        if (LooksLikeIssue(lowerMessage))
+        if (LooksLikeIssue(lowerMessage, knowledgeArticles))
         {
             return "troubleshooting_request";
         }
@@ -293,8 +284,14 @@ public class OpenRouterService(HttpClient httpClient, IConfiguration configurati
         return "Low";
     }
 
-    private static string DetectCategory(string lowerMessage)
+    private static string DetectCategory(string lowerMessage, List<backend.Models.KnowledgeBaseArticle> knowledgeArticles)
     {
+        var matchedArticle = knowledgeArticles.FirstOrDefault(article => lowerMessage.Contains(article.Category.ToLowerInvariant()) || lowerMessage.Contains(article.Title.ToLowerInvariant().Split(' ')[0]));
+        if (matchedArticle is not null)
+        {
+            return matchedArticle.Category;
+        }
+
         if (lowerMessage.Contains("wifi") || lowerMessage.Contains("network") || lowerMessage.Contains("internet") || lowerMessage.Contains("computer") || lowerMessage.Contains("printer"))
         {
             return "IT";
@@ -354,7 +351,7 @@ public class OpenRouterService(HttpClient httpClient, IConfiguration configurati
         return SafetyKeywords.Any(lowerMessage.Contains);
     }
 
-    private static bool LooksLikeIssue(string lowerMessage)
+    private static bool LooksLikeIssue(string lowerMessage, List<backend.Models.KnowledgeBaseArticle> knowledgeArticles)
     {
         return lowerMessage.Contains("not working")
             || lowerMessage.Contains("broken")
@@ -364,12 +361,13 @@ public class OpenRouterService(HttpClient httpClient, IConfiguration configurati
             || lowerMessage.Contains("problem")
             || lowerMessage.Contains("fault")
             || lowerMessage.Contains("error")
-            || DetectCategory(lowerMessage) is not "General";
+            || knowledgeArticles.Any(article => lowerMessage.Contains(article.Title.ToLowerInvariant().Split(' ')[0]) || lowerMessage.Contains(article.Category.ToLowerInvariant()))
+            || DetectCategory(lowerMessage, knowledgeArticles) is not "General";
     }
 
-    private static string DefaultSolution(string category)
+    private static string DefaultSolution(string category, List<backend.Models.KnowledgeBaseArticle> knowledgeArticles)
     {
-        return KnowledgeBase.FirstOrDefault(item => item.Category.Equals(category, StringComparison.OrdinalIgnoreCase))?.Guidance
+        return knowledgeArticles.FirstOrDefault(item => item.Category.Equals(category, StringComparison.OrdinalIgnoreCase))?.Guidance
             ?? "Please describe the issue and location clearly so the helpdesk can guide you or raise a ticket if needed.";
     }
 
@@ -387,6 +385,4 @@ public class OpenRouterService(HttpClient httpClient, IConfiguration configurati
         public string? HandoffReason { get; set; }
         public string BotMessage { get; set; } = string.Empty;
     }
-
-    private sealed record KnowledgeArticle(string Title, string Category, string Guidance);
 }

@@ -2,7 +2,7 @@ export interface AuthResponse {
   token: string;
   name: string;
   email: string;
-  role: 'User' | 'Admin';
+  role: 'User' | 'Admin' | 'Technician';
 }
 
 export interface UserSession extends AuthResponse {}
@@ -32,6 +32,31 @@ export interface Ticket {
   createdBy: number;
   createdByName?: string | null;
   assignedTo?: string | null;
+  canCurrentUserUpdate: boolean;
+}
+
+export interface TicketComment {
+  id: number;
+  body: string;
+  createdAt: string;
+  createdBy: number;
+  createdByName?: string | null;
+  createdByRole?: string | null;
+}
+
+export interface UserSummary {
+  id: number;
+  name: string;
+  email: string;
+  role: 'User' | 'Admin' | 'Technician';
+}
+
+export interface KnowledgeBaseArticle {
+  id: number;
+  title: string;
+  category: string;
+  guidance: string;
+  isActive: boolean;
 }
 
 export interface MessageBubble {

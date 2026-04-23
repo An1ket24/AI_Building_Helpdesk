@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { ChatService } from '../core/chat.service';
-import { ChatAnalysis, MessageBubble, Ticket } from '../core/models';
+import { ChatAnalysis, MessageBubble, Ticket, TicketComment } from '../core/models';
 import { TicketService } from '../core/ticket.service';
 import { ToastService } from '../core/toast.service';
 
@@ -23,6 +23,7 @@ export class HelpdeskPageComponent implements OnInit {
   private readonly router = inject(Router);
 
   protected readonly session = this.authService.session;
+  protected readonly isTechnician = computed(() => this.authService.role() === 'Technician');
   protected readonly messages = signal<MessageBubble[]>([
     { sender: 'bot', text: 'Hello. Describe your building issue and I will suggest a quick fix first.' }
   ]);
@@ -31,6 +32,9 @@ export class HelpdeskPageComponent implements OnInit {
   protected readonly isSending = signal(false);
   protected readonly pendingAnalysis = signal<ChatAnalysis | null>(null);
   protected readonly typing = signal(false);
+  protected readonly selectedTicket = signal<Ticket | null>(null);
+  protected readonly ticketComments = signal<TicketComment[]>([]);
+  protected readonly commentDraft = signal('');
   protected readonly hasTickets = computed(() => this.tickets().length > 0);
 
   async ngOnInit(): Promise<void> {
@@ -52,7 +56,7 @@ export class HelpdeskPageComponent implements OnInit {
     try {
       const analysis = await this.chatService.analyze(message);
       this.messages.update((items) => [...items, { sender: 'bot', text: analysis.botMessage }]);
-      this.pendingAnalysis.set(analysis.shouldOfferTicket ? analysis : null);
+      this.pendingAnalysis.set(!this.isTechnician() && analysis.shouldOfferTicket ? analysis : null);
 
       if (analysis.requiresHumanHandoff) {
         this.toastService.show('Human follow-up recommended for this issue.', 'info');
@@ -69,7 +73,7 @@ export class HelpdeskPageComponent implements OnInit {
 
   protected async confirmTicketCreation(confirmed: boolean): Promise<void> {
     const analysis = this.pendingAnalysis();
-    if (!analysis) {
+    if (!analysis || this.isTechnician()) {
       return;
     }
 
@@ -93,6 +97,55 @@ export class HelpdeskPageComponent implements OnInit {
     } catch (error) {
       console.error(error);
       this.toastService.show('Ticket creation failed.', 'error');
+    }
+  }
+
+  protected async openTicket(ticket: Ticket): Promise<void> {
+    this.selectedTicket.set(ticket);
+    this.commentDraft.set('');
+
+    try {
+      this.ticketComments.set(await this.ticketService.getComments(ticket.id));
+    } catch (error) {
+      console.error(error);
+      this.toastService.show('Could not load comments.', 'error');
+    }
+  }
+
+  protected async addComment(): Promise<void> {
+    const ticket = this.selectedTicket();
+    const body = this.commentDraft().trim();
+    if (!ticket || !body) {
+      return;
+    }
+
+    try {
+      const comment = await this.ticketService.addComment(ticket.id, { body });
+      this.ticketComments.update((items) => [...items, comment]);
+      this.commentDraft.set('');
+      this.toastService.show('Comment added.', 'success');
+    } catch (error) {
+      console.error(error);
+      this.toastService.show('Could not add comment.', 'error');
+    }
+  }
+
+  protected async saveTechnicianUpdate(ticket: Ticket): Promise<void> {
+    try {
+      const updated = await this.ticketService.updateTicket(ticket.id, {
+        status: ticket.status,
+        priority: ticket.priority,
+        assignedTo: ticket.assignedTo ?? ''
+      });
+
+      this.tickets.update((items) => items.map((item) => item.id === updated.id ? updated : item));
+      if (this.selectedTicket()?.id === updated.id) {
+        this.selectedTicket.set(updated);
+      }
+      this.toastService.show('Ticket progress updated.', 'success');
+    } catch (error) {
+      console.error(error);
+      this.toastService.show('Could not update ticket.', 'error');
     }
   }
 

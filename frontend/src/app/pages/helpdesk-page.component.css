@@ -109,6 +109,11 @@
   background: #fbfdff;
 }
 
+.selected-ticket {
+  border-color: #c7d8fb;
+  box-shadow: 0 10px 25px rgba(31, 84, 191, 0.08);
+}
+
 .ticket-topline,
 .ticket-meta {
   display: flex;
@@ -126,6 +131,45 @@
   padding: 28px;
   text-align: center;
   color: var(--muted);
+}
+
+.ticket-actions-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.compact {
+  max-width: 180px;
+}
+
+.ticket-detail-panel {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.comment-list {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.comment-item {
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #f8fbff;
+}
+
+.comment-item p {
+  margin-bottom: 0;
+}
+
+.comment-editor {
+  display: grid;
+  gap: 12px;
 }
 
 @media (max-width: 900px) {

@@ -15,6 +15,7 @@ export class AuthService {
   readonly session = computed(() => this.sessionState());
   readonly isLoggedIn = computed(() => !!this.sessionState());
   readonly role = computed(() => this.sessionState()?.role ?? null);
+  readonly email = computed(() => this.sessionState()?.email ?? null);
 
   async login(payload: { email: string; password: string }): Promise<UserSession> {
     const response = await firstValueFrom(this.http.post<AuthResponse>(`${this.apiUrl}/login`, payload));

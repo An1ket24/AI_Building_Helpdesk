@@ -4,7 +4,7 @@
       <div>
         <span class="pill">Admin Dashboard</span>
         <h1>Building support operations</h1>
-        <p class="muted">Track ticket status, assign work, and keep the queue moving.</p>
+        <p class="muted">Track ticket status, assign technicians, manage comments, and maintain the chatbot knowledge base.</p>
       </div>
       <button class="btn btn-secondary" type="button" (click)="logout()">Logout</button>
     </section>
@@ -25,6 +25,28 @@
     </section>
 
     <section class="card table-card">
+      <div class="filter-row">
+        <input class="input" [ngModel]="searchTerm()" (ngModelChange)="searchTerm.set($event)" placeholder="Search issue, category, location, user, technician" />
+        <select class="select compact" [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)">
+          <option value="All">All Statuses</option>
+          <option value="Open">Open</option>
+          <option value="In Progress">In Progress</option>
+          <option value="Resolved">Resolved</option>
+        </select>
+        <select class="select compact" [ngModel]="priorityFilter()" (ngModelChange)="priorityFilter.set($event)">
+          <option value="All">All Priorities</option>
+          <option value="Low">Low</option>
+          <option value="Medium">Medium</option>
+          <option value="High">High</option>
+        </select>
+        <select class="select compact" [ngModel]="categoryFilter()" (ngModelChange)="categoryFilter.set($event)">
+          <option value="All">All Categories</option>
+          @for (category of categories(); track category) {
+            <option [value]="category">{{ category }}</option>
+          }
+        </select>
+      </div>
+
       <div class="table-wrap">
         <table>
           <thead>
@@ -35,25 +57,22 @@
               <th>Location</th>
               <th>Status</th>
               <th>Priority</th>
-              <th>Assign</th>
+              <th>Assign Technician</th>
               <th>Created By</th>
               <th>Created</th>
+              <th></th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            @for (ticket of tickets(); track ticket.id) {
+            @for (ticket of filteredTickets(); track ticket.id) {
               <tr>
                 <td>#{{ ticket.id }}</td>
                 <td>{{ ticket.issue }}</td>
                 <td>{{ ticket.category }}</td>
                 <td>{{ ticket.location || '-' }}</td>
                 <td>
-                  <select class="select compact" [(ngModel)]="ticket.status">
-                    <option value="Open">Open</option>
-                    <option value="In Progress">In Progress</option>
-                    <option value="Resolved">Resolved</option>
-                  </select>
+                  <span [class]="'status-' + ticket.status.toLowerCase().replace(' ', '-')">{{ ticket.status }}</span>
                 </td>
                 <td>
                   <select class="select compact" [(ngModel)]="ticket.priority">
@@ -63,10 +82,18 @@
                   </select>
                 </td>
                 <td>
-                  <input class="input compact" [(ngModel)]="ticket.assignedTo" placeholder="Assign to" />
+                  <select class="select compact" [(ngModel)]="ticket.assignedTo">
+                    <option [ngValue]="null">Unassigned</option>
+                    @for (technician of technicians(); track technician.id) {
+                      <option [ngValue]="technician.email">{{ technician.name }} ({{ technician.email }})</option>
+                    }
+                  </select>
                 </td>
                 <td>{{ ticket.createdByName || 'User #' + ticket.createdBy }}</td>
                 <td>{{ ticket.createdAt | date:'short' }}</td>
+                <td>
+                  <button class="btn btn-secondary compact-btn" type="button" (click)="openTicket(ticket)">Comments</button>
+                </td>
                 <td>
                   <button class="btn btn-primary compact-btn" type="button" (click)="saveTicket(ticket)">Save</button>
                 </td>
@@ -74,6 +101,66 @@
             }
           </tbody>
         </table>
+      </div>
+    </section>
+
+    @if (selectedTicket()) {
+      <section class="card detail-card">
+        <div class="section-header">
+          <h2>Ticket Comments</h2>
+          <span class="muted">#{{ selectedTicket()?.id }} {{ selectedTicket()?.issue }}</span>
+        </div>
+        <div class="comment-list">
+          @for (comment of ticketComments(); track comment.id) {
+            <article class="comment-item">
+              <strong>{{ comment.createdByName || 'User #' + comment.createdBy }}</strong>
+              <span class="muted">{{ comment.createdByRole || 'User' }} • {{ comment.createdAt | date:'short' }}</span>
+              <p>{{ comment.body }}</p>
+            </article>
+          }
+        </div>
+        <div class="comment-editor">
+          <textarea class="textarea" [ngModel]="commentDraft()" (ngModelChange)="commentDraft.set($event)" rows="3" placeholder="Add an admin or technician note"></textarea>
+          <button class="btn btn-primary" type="button" (click)="addComment()">Add comment</button>
+        </div>
+      </section>
+    }
+
+    <section class="card kb-card">
+      <div class="section-header">
+        <h2>Knowledge Base</h2>
+        <span class="muted">Manage chatbot guidance articles</span>
+      </div>
+
+      <div class="kb-editor create-row">
+        <input class="input" [ngModel]="newArticle().title" (ngModelChange)="updateNewArticle('title', $event)" placeholder="Article title" />
+        <input class="input" [ngModel]="newArticle().category" (ngModelChange)="updateNewArticle('category', $event)" placeholder="Category" />
+        <textarea class="textarea" [ngModel]="newArticle().guidance" (ngModelChange)="updateNewArticle('guidance', $event)" rows="2" placeholder="Guidance used by the chatbot"></textarea>
+        <label class="toggle-row">
+          <input type="checkbox" [ngModel]="newArticle().isActive" (ngModelChange)="updateNewArticle('isActive', $event)" />
+          <span>Active</span>
+        </label>
+        <button class="btn btn-primary" type="button" (click)="createArticle()">Add article</button>
+      </div>
+
+      <div class="kb-list">
+        @for (article of knowledgeArticles(); track article.id) {
+          <article class="kb-item">
+            <div class="kb-grid">
+              <input class="input" [(ngModel)]="article.title" />
+              <input class="input" [(ngModel)]="article.category" />
+              <textarea class="textarea" [(ngModel)]="article.guidance" rows="3"></textarea>
+              <label class="toggle-row">
+                <input type="checkbox" [(ngModel)]="article.isActive" />
+                <span>Active</span>
+              </label>
+            </div>
+            <div class="kb-actions">
+              <button class="btn btn-primary" type="button" (click)="saveArticle(article)">Save</button>
+              <button class="btn btn-secondary" type="button" (click)="deleteArticle(article)">Delete</button>
+            </div>
+          </article>
+        }
       </div>
     </section>
   </div>

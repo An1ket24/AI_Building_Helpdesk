@@ -19,6 +19,7 @@ public class JwtTokenService(IConfiguration configuration) : IJwtTokenService
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email),
+            new(ClaimTypes.Email, user.Email),
             new(ClaimTypes.Name, user.Name),
             new(ClaimTypes.Role, user.Role.ToString())
         };

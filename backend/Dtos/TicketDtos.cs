@@ -8,6 +8,10 @@ public record CreateTicketRequest(
 
 public record UpdateTicketRequest(string Status, string Priority, string? AssignedTo);
 
+public record CreateTicketCommentRequest(string Body);
+
+public record TicketCommentResponse(int Id, string Body, DateTime CreatedAt, int CreatedBy, string? CreatedByName, string? CreatedByRole);
+
 public record TicketResponse(
     int Id,
     string Issue,
@@ -18,4 +22,5 @@ public record TicketResponse(
     DateTime CreatedAt,
     int CreatedBy,
     string? CreatedByName,
-    string? AssignedTo);
+    string? AssignedTo,
+    bool CanCurrentUserUpdate);

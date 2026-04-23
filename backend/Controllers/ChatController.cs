@@ -1,4 +1,5 @@
 using backend.Dtos;
+using backend.Models;
 using backend.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -19,6 +20,16 @@ public class ChatController(IOpenRouterService openRouterService) : ControllerBa
         }
 
         var response = await openRouterService.AnalyzeIssueAsync(request.Message, cancellationToken);
+
+        if (User.IsInRole(UserRole.Technician.ToString()) && response.ShouldOfferTicket)
+        {
+            response = response with
+            {
+                ShouldOfferTicket = false,
+                BotMessage = $"{response.Solution} As a technician, you can use this chat for troubleshooting guidance and update your assigned tickets from the list below."
+            };
+        }
+
         return Ok(response);
     }
 }

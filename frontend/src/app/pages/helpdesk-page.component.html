@@ -4,7 +4,7 @@
       <div>
         <span class="pill">Smart Helpdesk Bot</span>
         <h1>Welcome, {{ session()?.name }}</h1>
-        <p class="muted">Describe the issue in natural language. The bot will suggest a quick fix and ask before creating a ticket.</p>
+        <p class="muted">{{ isTechnician() ? 'Use the chatbot for troubleshooting help and update your assigned tickets below.' : 'Describe the issue in natural language. The bot will suggest a quick fix and ask before creating a ticket.' }}</p>
       </div>
 
       <div class="hero-actions">
@@ -19,7 +19,7 @@
       <div class="chat-header">
         <div>
           <h2>Smart Helpdesk Bot</h2>
-          <p class="muted">Ask about WiFi, HVAC, plumbing, cleaning, or access issues.</p>
+          <p class="muted">{{ isTechnician() ? 'Ask for troubleshooting guidance for the issue you are working on.' : 'Ask about WiFi, HVAC, plumbing, cleaning, or access issues.' }}</p>
         </div>
       </div>
 
@@ -69,14 +69,14 @@
 
     <section class="card tickets-card">
       <div class="section-header">
-        <h2>My Tickets</h2>
+        <h2>{{ isTechnician() ? 'Assigned / My Tickets' : 'My Tickets' }}</h2>
         <span class="muted">{{ tickets().length }} total</span>
       </div>
 
       @if (hasTickets()) {
         <div class="ticket-list">
           @for (ticket of tickets(); track ticket.id) {
-            <article class="ticket-item">
+            <article class="ticket-item" [class.selected-ticket]="selectedTicket()?.id === ticket.id">
               <div class="ticket-topline">
                 <strong>{{ ticket.issue }}</strong>
                 <span class="pill small">{{ ticket.priority }}</span>
@@ -84,15 +84,49 @@
               <div class="ticket-meta muted">
                 <span>{{ ticket.category }}</span>
                 <span>{{ ticket.location || 'No location' }}</span>
+                <span>{{ ticket.assignedTo || 'Unassigned' }}</span>
                 <span [class]="'status-' + ticket.status.toLowerCase().replace(' ', '-')">{{ ticket.status }}</span>
               </div>
               <small class="muted">{{ ticket.createdAt | date:'medium' }}</small>
+              <div class="ticket-actions-row">
+                <button class="btn btn-secondary" type="button" (click)="openTicket(ticket)">View details</button>
+                @if (isTechnician() && ticket.canCurrentUserUpdate) {
+                  <select class="select compact" [(ngModel)]="ticket.status">
+                    <option value="Open">Open</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Resolved">Resolved</option>
+                  </select>
+                  <button class="btn btn-primary" type="button" (click)="saveTechnicianUpdate(ticket)">Update progress</button>
+                }
+              </div>
             </article>
           }
         </div>
       } @else {
         <div class="empty-state">
-          <p>No tickets yet. Use the chatbot to create one when needed.</p>
+          <p>{{ isTechnician() ? 'No assigned tickets yet.' : 'No tickets yet. Use the chatbot to create one when needed.' }}</p>
+        </div>
+      }
+
+      @if (selectedTicket()) {
+        <div class="ticket-detail-panel">
+          <div class="section-header">
+            <h3>{{ selectedTicket()?.issue }}</h3>
+            <span class="muted">Comments</span>
+          </div>
+          <div class="comment-list">
+            @for (comment of ticketComments(); track comment.id) {
+              <article class="comment-item">
+                <strong>{{ comment.createdByName || 'User #' + comment.createdBy }}</strong>
+                <span class="muted">{{ comment.createdByRole || 'User' }} • {{ comment.createdAt | date:'short' }}</span>
+                <p>{{ comment.body }}</p>
+              </article>
+            }
+          </div>
+          <div class="comment-editor">
+            <textarea class="textarea" [ngModel]="commentDraft()" (ngModelChange)="commentDraft.set($event)" rows="3" placeholder="Add a comment or update"></textarea>
+            <button class="btn btn-primary" type="button" (click)="addComment()">Add comment</button>
+          </div>
         </div>
       }
     </section>

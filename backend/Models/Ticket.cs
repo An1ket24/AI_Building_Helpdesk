@@ -12,4 +12,5 @@ public class Ticket
     public int CreatedBy { get; set; }
     public User? CreatedByUser { get; set; }
     public string? AssignedTo { get; set; }
+    public ICollection<TicketComment> Comments { get; set; } = [];
 }
